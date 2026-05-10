@@ -1,4 +1,4 @@
-# ahar0603_9301_capstone_idea_2
+# Frosted Glass Canvas
 
 This project is an interactive p5.js installation prototype that explores the tension between visibility and obscurity. Using a live camera feed, the work transforms the viewer's image into a softened, rain-covered, frosted-glass surface. The screen behaves like a temporary membrane: when the viewer clicks and drags, they gently wipe away the condensation and reveal fragments of the image beneath.
 
