@@ -16,6 +16,11 @@ const WIPE_FEATHER_RATIO = 2.2;
 const WIPE_MIN_MARK_DISTANCE_RATIO = 0.16;
 const REFOG_DELAY_MS = 3000;
 const REFOG_DURATION_MS = 9000;
+const SMEAR_OFFSETS = [
+  [-20, -10], [20, -10], [-20, 10], [20, 10],
+  [-14, -24], [14, -24], [-14, 24], [14, 24],
+  [-34, 0], [34, 0], [0, -34], [0, 34]
+];
 
 function preload() {
   fogTexture1 = loadImage("images/fog 01.jpg");
@@ -54,41 +59,35 @@ function setupCamera() {
 }
 
 function rebuildLayers() {
-  sceneLayer = createGraphics(width, height);
-  blurLayer = createGraphics(width, height);
-  fogLayer = createGraphics(width, height);
-  effectLayer = createGraphics(width, height);
-  maskLayer = createGraphics(width, height);
-  maskedEffectLayer = createGraphics(width, height);
+  [sceneLayer, blurLayer, fogLayer, effectLayer, maskLayer, maskedEffectLayer] =
+    Array.from({ length: 6 }, () => createGraphics(width, height));
 
-  sceneLayer.pixelDensity(1);
-  blurLayer.pixelDensity(1);
-  fogLayer.pixelDensity(1);
-  effectLayer.pixelDensity(1);
-  maskLayer.pixelDensity(1);
-  maskedEffectLayer.pixelDensity(1);
+  for (const layer of [sceneLayer, blurLayer, fogLayer, effectLayer, maskLayer, maskedEffectLayer]) {
+    layer.pixelDensity(1);
+  }
 
   buildFogLayer();
   buildMaskLayer();
 }
 
 function draw() {
+  const cameraReady = hasCameraFrame();
+
   background(215, 224, 230);
 
-  if (hasCameraFrame()) {
+  if (cameraReady) {
     renderCameraScene();
-    renderBlurredScene();
   } else {
     renderFallbackScene();
-    renderBlurredScene();
   }
 
+  renderBlurredScene();
   image(sceneLayer, 0, 0, width, height);
   updateMaskLayer();
   renderEffectComposite();
   image(maskedEffectLayer, 0, 0, width, height);
 
-  if (!hasCameraFrame()) {
+  if (!cameraReady) {
     drawCameraPrompt();
   }
 }
@@ -114,20 +113,6 @@ function renderCameraScene() {
 
 function renderBlurredScene() {
   const ctx = blurLayer.drawingContext;
-  const smearOffsets = [
-    [-20, -10],
-    [20, -10],
-    [-20, 10],
-    [20, 10],
-    [-14, -24],
-    [14, -24],
-    [-14, 24],
-    [14, 24],
-    [-34, 0],
-    [34, 0],
-    [0, -34],
-    [0, 34]
-  ];
 
   blurLayer.clear();
 
@@ -139,7 +124,7 @@ function renderBlurredScene() {
   blurLayer.push();
   blurLayer.tint(255, 20);
 
-  for (const [dx, dy] of smearOffsets) {
+  for (const [dx, dy] of SMEAR_OFFSETS) {
     blurLayer.image(sceneLayer, dx, dy, width, height);
   }
 
@@ -274,16 +259,13 @@ function drawClearPath(ctx, trail) {
 function drawAtmosphereWash(target) {
   const ctx = target.drawingContext;
 
-  // Dense white-gray fog base
   target.noStroke();
   target.fill(248, 251, 254, 148);
   target.rect(0, 0, width, height);
 
-  // Brighter top — sky light diffusing through fog
   target.fill(255, 255, 255, 55);
   target.rect(0, 0, width, height * 0.38);
 
-  // Cool blue-gray depth at bottom
   target.fill(148, 178, 205, 46);
   target.rect(0, height * 0.62, width, height * 0.38);
 
@@ -292,7 +274,6 @@ function drawAtmosphereWash(target) {
 
   noiseSeed(8);
 
-  // More numerous and larger fog banks
   for (let i = 0; i < 22; i++) {
     const x = noise(i * 0.23, 12) * width;
     const y = noise(i * 0.37, 32) * height;
@@ -306,18 +287,6 @@ function drawAtmosphereWash(target) {
   ctx.restore();
 }
 
-function drawReferenceOverlay(target, img, alpha, mode, tintColor) {
-  if (!img) {
-    return;
-  }
-
-  target.blendMode(mode);
-  target.tint(red(tintColor), green(tintColor), blue(tintColor), alpha);
-  drawCoverImage(target, img, 0, 0, width, height);
-  target.noTint();
-  target.blendMode(BLEND);
-}
-
 function buildMistParticles(target) {
   const g = target;
   const particleCount = floor((width * height) * 0.003);
@@ -325,13 +294,11 @@ function buildMistParticles(target) {
   randomSeed(33);
   g.strokeWeight(1.5);
 
-  // Fine mist specks
   for (let i = 0; i < particleCount; i++) {
     g.stroke(255, 255, 255, random(4, 14));
     g.point(random(width), random(height));
   }
 
-  // Slightly larger soft mist droplets for volumetric feel
   randomSeed(77);
   g.noStroke();
   for (let i = 0; i < floor(particleCount * 0.28); i++) {
@@ -495,16 +462,13 @@ function mouseReleased() {
 }
 
 function touchStarted() {
-  startDewTrail(mouseX, mouseY);
-  return false;
+  return mousePressed();
 }
 
 function touchMoved() {
-  extendDewTrail(mouseX, mouseY);
-  return false;
+  return mouseDragged();
 }
 
 function touchEnded() {
-  activeWipeTrail = null;
-  return false;
+  return mouseReleased();
 }
