@@ -1,12 +1,12 @@
 let cameraFeed;
 let sceneLayer;
 let blurLayer;
-let frostLayer;
+let fogLayer;
 let effectLayer;
 let maskLayer;
 let maskedEffectLayer;
-let rainTexture;
-let glowTexture;
+let fogTexture1;
+let fogTexture2;
 let wipeMarks = [];
 let activeWipeTrail = null;
 
@@ -18,8 +18,8 @@ const REFOG_DELAY_MS = 3000;
 const REFOG_DURATION_MS = 9000;
 
 function preload() {
-  rainTexture = loadImage("images/background-rain-drops-close-up.jpg");
-  glowTexture = loadImage("images/abstract-wet-glass-texture-with-gradient-hues.jpg");
+  fogTexture1 = loadImage("images/fog 01.jpg");
+  fogTexture2 = loadImage("images/fog 02.jpg");
 }
 
 function setup() {
@@ -56,24 +56,24 @@ function setupCamera() {
 function rebuildLayers() {
   sceneLayer = createGraphics(width, height);
   blurLayer = createGraphics(width, height);
-  frostLayer = createGraphics(width, height);
+  fogLayer = createGraphics(width, height);
   effectLayer = createGraphics(width, height);
   maskLayer = createGraphics(width, height);
   maskedEffectLayer = createGraphics(width, height);
 
   sceneLayer.pixelDensity(1);
   blurLayer.pixelDensity(1);
-  frostLayer.pixelDensity(1);
+  fogLayer.pixelDensity(1);
   effectLayer.pixelDensity(1);
   maskLayer.pixelDensity(1);
   maskedEffectLayer.pixelDensity(1);
 
-  buildFrostLayer();
+  buildFogLayer();
   buildMaskLayer();
 }
 
 function draw() {
-  background(208, 220, 226);
+  background(215, 224, 230);
 
   if (hasCameraFrame()) {
     renderCameraScene();
@@ -115,29 +115,29 @@ function renderCameraScene() {
 function renderBlurredScene() {
   const ctx = blurLayer.drawingContext;
   const smearOffsets = [
-    [-18, 0],
-    [18, 0],
-    [0, -18],
-    [0, 18],
-    [-12, -12],
-    [12, -12],
-    [-12, 12],
-    [12, 12],
-    [-26, 0],
-    [26, 0],
-    [0, -26],
-    [0, 26]
+    [-20, -10],
+    [20, -10],
+    [-20, 10],
+    [20, 10],
+    [-14, -24],
+    [14, -24],
+    [-14, 24],
+    [14, 24],
+    [-34, 0],
+    [34, 0],
+    [0, -34],
+    [0, 34]
   ];
 
   blurLayer.clear();
 
   ctx.save();
-  ctx.filter = "blur(22px) saturate(0.86) brightness(0.92) contrast(0.9)";
+  ctx.filter = "blur(36px) saturate(0.52) brightness(1.12) contrast(0.76)";
   blurLayer.image(sceneLayer, 0, 0, width, height);
   ctx.restore();
 
   blurLayer.push();
-  blurLayer.tint(255, 18);
+  blurLayer.tint(255, 20);
 
   for (const [dx, dy] of smearOffsets) {
     blurLayer.image(sceneLayer, dx, dy, width, height);
@@ -146,14 +146,14 @@ function renderBlurredScene() {
   blurLayer.pop();
 
   blurLayer.noStroke();
-  blurLayer.fill(228, 236, 239, 70);
+  blurLayer.fill(246, 250, 253, 120);
   blurLayer.rect(0, 0, width, height);
 }
 
 function renderFallbackScene() {
-  const topColor = color(228, 238, 244);
-  const midColor = color(165, 205, 224);
-  const bottomColor = color(31, 44, 64);
+  const topColor = color(235, 242, 248);
+  const midColor = color(170, 202, 220);
+  const bottomColor = color(42, 58, 76);
 
   sceneLayer.clear();
 
@@ -168,12 +168,10 @@ function renderFallbackScene() {
   }
 }
 
-function buildFrostLayer() {
-  frostLayer.clear();
-  drawAtmosphereWash(frostLayer);
-  drawReferenceOverlay(frostLayer, rainTexture, 78, SOFT_LIGHT, color(210, 236, 248));
-  drawReferenceOverlay(frostLayer, glowTexture, 112, SCREEN, color(255, 244, 250));
-  buildGrainLayer(frostLayer);
+function buildFogLayer() {
+  fogLayer.clear();
+  drawAtmosphereWash(fogLayer);
+  buildMistParticles(fogLayer);
 }
 
 function buildMaskLayer() {
@@ -276,28 +274,32 @@ function drawClearPath(ctx, trail) {
 function drawAtmosphereWash(target) {
   const ctx = target.drawingContext;
 
+  // Dense white-gray fog base
   target.noStroke();
-  target.fill(235, 242, 245, 74);
+  target.fill(248, 251, 254, 148);
   target.rect(0, 0, width, height);
 
-  target.fill(255, 236, 242, 28);
-  target.rect(0, 0, width, height * 0.42);
+  // Brighter top — sky light diffusing through fog
+  target.fill(255, 255, 255, 55);
+  target.rect(0, 0, width, height * 0.38);
 
-  target.fill(70, 116, 146, 36);
-  target.rect(0, height * 0.58, width, height * 0.42);
+  // Cool blue-gray depth at bottom
+  target.fill(148, 178, 205, 46);
+  target.rect(0, height * 0.62, width, height * 0.38);
 
   ctx.save();
-  ctx.filter = "blur(54px)";
+  ctx.filter = "blur(90px)";
 
   noiseSeed(8);
 
-  for (let i = 0; i < 12; i++) {
+  // More numerous and larger fog banks
+  for (let i = 0; i < 22; i++) {
     const x = noise(i * 0.23, 12) * width;
     const y = noise(i * 0.37, 32) * height;
-    const w = map(noise(i * 0.11, 52), 0, 1, width * 0.24, width * 0.62);
-    const h = map(noise(i * 0.29, 72), 0, 1, height * 0.1, height * 0.28);
+    const w = map(noise(i * 0.11, 52), 0, 1, width * 0.4, width * 0.92);
+    const h = map(noise(i * 0.29, 72), 0, 1, height * 0.2, height * 0.5);
 
-    target.fill(255, 255, 255, 18);
+    target.fill(255, 255, 255, 35);
     target.ellipse(x, y, w, h);
   }
 
@@ -316,17 +318,52 @@ function drawReferenceOverlay(target, img, alpha, mode, tintColor) {
   target.blendMode(BLEND);
 }
 
-function buildGrainLayer(target) {
+function buildMistParticles(target) {
   const g = target;
-  const grainCount = floor((width * height) * 0.0035);
+  const particleCount = floor((width * height) * 0.003);
 
   randomSeed(33);
-  g.strokeWeight(1);
+  g.strokeWeight(1.5);
 
-  for (let i = 0; i < grainCount; i++) {
-    g.stroke(255, 255, 255, random(5, 16));
+  // Fine mist specks
+  for (let i = 0; i < particleCount; i++) {
+    g.stroke(255, 255, 255, random(4, 14));
     g.point(random(width), random(height));
   }
+
+  // Slightly larger soft mist droplets for volumetric feel
+  randomSeed(77);
+  g.noStroke();
+  for (let i = 0; i < floor(particleCount * 0.28); i++) {
+    g.fill(255, 255, 255, random(3, 10));
+    g.ellipse(random(width), random(height), random(4, 11), random(2, 6));
+  }
+}
+
+function drawAnimatedFogTextures(target) {
+  const t = millis();
+  const oversize = 1.18;
+  const padX = width * (oversize - 1) * 0.5;
+  const padY = height * (oversize - 1) * 0.5;
+
+  // Each texture drifts in opposite directions for a parallax depth feel
+  const pan1X = sin(t * 0.00007) * padX;
+  const pan1Y = cos(t * 0.00005) * padY;
+  const pan2X = -cos(t * 0.00006) * padX;
+  const pan2Y = -sin(t * 0.00004) * padY;
+
+  target.push();
+  target.blendMode(SCREEN);
+
+  target.tint(235, 240, 248, 92);
+  target.image(fogTexture1, -padX + pan1X, -padY + pan1Y, width * oversize, height * oversize);
+
+  target.tint(255, 255, 255, 68);
+  target.image(fogTexture2, -padX + pan2X, -padY + pan2Y, width * oversize, height * oversize);
+
+  target.noTint();
+  target.blendMode(BLEND);
+  target.pop();
 }
 
 function renderEffectComposite() {
@@ -334,7 +371,8 @@ function renderEffectComposite() {
 
   effectLayer.clear();
   effectLayer.image(blurLayer, 0, 0, width, height);
-  effectLayer.image(frostLayer, 0, 0, width, height);
+  effectLayer.image(fogLayer, 0, 0, width, height);
+  drawAnimatedFogTextures(effectLayer);
 
   maskedEffectLayer.clear();
   maskedEffectLayer.image(effectLayer, 0, 0, width, height);
@@ -398,7 +436,7 @@ function drawCameraPrompt() {
   if (needsSecureContext) {
     text("Open from localhost and allow camera access", width / 2, height / 2);
   } else {
-    text("Allow front camera access to see the live frosted blur", width / 2, height / 2);
+    text("Allow front camera access to see through the misty fog", width / 2, height / 2);
   }
 }
 
