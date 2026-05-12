@@ -1,4 +1,11 @@
 let cameraFeed;
+let socket = null;
+let peer = null;
+let myRole = null;
+let remoteVideoEl = null;
+let remoteFeed = null;
+let peerConnected = false;
+
 let sceneLayer;
 let blurLayer;
 let fogLayer;
@@ -34,6 +41,7 @@ function setup() {
 
   setupCamera();
   rebuildLayers();
+  setupNetwork();
 }
 
 function setupCamera() {
@@ -56,6 +64,75 @@ function setupCamera() {
   cameraFeed.size(640, 480);
   cameraFeed.attribute("playsinline", "");
   cameraFeed.hide();
+}
+
+function setupNetwork() {
+  socket = io();
+
+  socket.on('role-assigned', ({ role }) => {
+    myRole = role;
+    console.log('Role assigned:', role);
+  });
+
+  socket.on('peer-joined', () => {
+    initWebRTCPeer(true);
+  });
+
+  socket.on('signal', ({ data }) => {
+    if (!peer) initWebRTCPeer(false);
+    peer.signal(data);
+  });
+
+  socket.on('remote-wipe-start', ({ nx, ny }) => {
+    startDewTrail(nx * width, ny * height);
+  });
+
+  socket.on('remote-wipe-move', ({ nx, ny }) => {
+    extendDewTrail(nx * width, ny * height);
+  });
+
+  socket.on('remote-wipe-end', () => {
+    activeWipeTrail = null;
+  });
+
+  socket.on('peer-left', () => {
+    peerConnected = false;
+    remoteFeed = null;
+    remoteVideoEl = null;
+    if (peer) { peer.destroy(); peer = null; }
+    console.log('Other device disconnected');
+  });
+
+  socket.emit('join');
+}
+
+function initWebRTCPeer(initiator) {
+  remoteVideoEl = document.createElement('video');
+  remoteVideoEl.setAttribute('autoplay', '');
+  remoteVideoEl.setAttribute('playsinline', '');
+  remoteVideoEl.muted = true;
+  remoteVideoEl.style.display = 'none';
+  document.body.appendChild(remoteVideoEl);
+
+  peer = new SimplePeer({
+    initiator,
+    trickle: true,
+    stream: cameraFeed.elt.srcObject
+  });
+
+  peer.on('signal', (data) => socket.emit('signal', { data }));
+
+  peer.on('stream', (remoteStream) => {
+    remoteVideoEl.srcObject = remoteStream;
+    remoteVideoEl.play();
+    remoteVideoEl.addEventListener('loadedmetadata', () => {
+      remoteFeed = { elt: remoteVideoEl };
+      peerConnected = true;
+      console.log('Remote feed connected');
+    });
+  });
+
+  peer.on('error', (err) => console.error('SimplePeer error:', err));
 }
 
 function rebuildLayers() {
@@ -103,11 +180,13 @@ function hasCameraFrame() {
 }
 
 function renderCameraScene() {
+  const source = (peerConnected && remoteFeed) ? remoteFeed : cameraFeed;
+
   sceneLayer.clear();
   sceneLayer.push();
   sceneLayer.translate(width, 0);
   sceneLayer.scale(-1, 1);
-  drawCoverImage(sceneLayer, cameraFeed, 0, 0, width, height);
+  drawCoverImage(sceneLayer, source, 0, 0, width, height);
   sceneLayer.pop();
 }
 
@@ -448,16 +527,19 @@ function windowResized() {
 
 function mousePressed() {
   startDewTrail(mouseX, mouseY);
+  if (socket) socket.emit('wipe-start', { nx: mouseX / width, ny: mouseY / height });
   return false;
 }
 
 function mouseDragged() {
   extendDewTrail(mouseX, mouseY);
+  if (socket) socket.emit('wipe-move', { nx: mouseX / width, ny: mouseY / height });
   return false;
 }
 
 function mouseReleased() {
   activeWipeTrail = null;
+  if (socket) socket.emit('wipe-end');
   return false;
 }
 
