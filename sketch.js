@@ -5,6 +5,10 @@ let myRole = null;
 let remoteVideoEl = null;
 let remoteFeed = null;
 let peerConnected = false;
+let cameraStream = null;
+let peerInitPending = null;
+let pendingSignals = [];
+let remoteWipeTrail = null;
 
 let sceneLayer;
 let blurLayer;
@@ -55,8 +59,12 @@ function setupCamera() {
       audio: false
     },
     () => {
-      if (cameraFeed) {
-        cameraFeed.hide();
+      cameraStream = cameraFeed.elt.srcObject;
+      cameraFeed.hide();
+      if (peerInitPending !== null) {
+        const initiator = peerInitPending;
+        peerInitPending = null;
+        initWebRTCPeer(initiator);
       }
     }
   );
@@ -75,24 +83,47 @@ function setupNetwork() {
   });
 
   socket.on('peer-joined', () => {
-    initWebRTCPeer(true);
+    if (cameraStream) {
+      initWebRTCPeer(true);
+    } else {
+      peerInitPending = true;
+    }
   });
 
   socket.on('signal', ({ data }) => {
-    if (!peer) initWebRTCPeer(false);
-    peer.signal(data);
+    if (!peer) {
+      pendingSignals.push(data);
+      if (cameraStream) {
+        initWebRTCPeer(false);
+      } else {
+        peerInitPending = false;
+      }
+    } else {
+      peer.signal(data);
+    }
   });
 
   socket.on('remote-wipe-start', ({ nx, ny }) => {
-    startDewTrail(nx * width, ny * height);
+    remoteWipeTrail = {
+      points: [{ x: nx * width, y: ny * height }],
+      size: min(width, height) * WIPE_SIZE_RATIO,
+      createdAt: millis()
+    };
+    wipeMarks.push(remoteWipeTrail);
   });
 
   socket.on('remote-wipe-move', ({ nx, ny }) => {
-    extendDewTrail(nx * width, ny * height);
+    if (!remoteWipeTrail) return;
+    const x = nx * width;
+    const y = ny * height;
+    const pts = remoteWipeTrail.points;
+    const last = pts[pts.length - 1];
+    const minDist = min(width, height) * WIPE_SIZE_RATIO * WIPE_MIN_MARK_DISTANCE_RATIO;
+    if (dist(last.x, last.y, x, y) >= minDist) pts.push({ x, y });
   });
 
   socket.on('remote-wipe-end', () => {
-    activeWipeTrail = null;
+    remoteWipeTrail = null;
   });
 
   socket.on('peer-left', () => {
@@ -114,25 +145,29 @@ function initWebRTCPeer(initiator) {
   remoteVideoEl.style.display = 'none';
   document.body.appendChild(remoteVideoEl);
 
-  peer = new SimplePeer({
-    initiator,
-    trickle: true,
-    stream: cameraFeed.elt.srcObject
-  });
+  peer = new SimplePeer({ initiator, trickle: true, stream: cameraStream });
 
   peer.on('signal', (data) => socket.emit('signal', { data }));
 
   peer.on('stream', (remoteStream) => {
     remoteVideoEl.srcObject = remoteStream;
-    remoteVideoEl.play();
-    remoteVideoEl.addEventListener('loadedmetadata', () => {
-      remoteFeed = { elt: remoteVideoEl };
-      peerConnected = true;
-      console.log('Remote feed connected');
-    });
+
+    const onReady = () => {
+      if (!peerConnected && remoteVideoEl.videoWidth > 0) {
+        peerConnected = true;
+        console.log('Remote feed connected');
+      }
+    };
+
+    remoteVideoEl.addEventListener('loadedmetadata', onReady);
+    remoteVideoEl.addEventListener('canplay', onReady);
+    remoteVideoEl.play().catch(e => console.error('Remote video play error:', e));
   });
 
   peer.on('error', (err) => console.error('SimplePeer error:', err));
+
+  pendingSignals.forEach(d => peer.signal(d));
+  pendingSignals = [];
 }
 
 function rebuildLayers() {
@@ -180,7 +215,9 @@ function hasCameraFrame() {
 }
 
 function renderCameraScene() {
-  const source = (peerConnected && remoteFeed) ? remoteFeed : cameraFeed;
+  const remoteReady = peerConnected && remoteVideoEl &&
+    remoteVideoEl.videoWidth > 0 && remoteVideoEl.readyState >= 2;
+  const source = remoteReady ? remoteVideoEl : cameraFeed;
 
   sceneLayer.clear();
   sceneLayer.push();
@@ -487,18 +524,9 @@ function drawCameraPrompt() {
 }
 
 function drawCoverImage(target, source, x, y, w, h) {
-  const sourceWidth =
-    (source.elt && source.elt.videoWidth) ||
-    source.videoWidth ||
-    source.width ||
-    (source.elt && source.elt.width) ||
-    1;
-  const sourceHeight =
-    (source.elt && source.elt.videoHeight) ||
-    source.videoHeight ||
-    source.height ||
-    (source.elt && source.elt.height) ||
-    1;
+  const el = (source && source.elt) ? source.elt : source;
+  const sourceWidth = el.videoWidth || el.width || 1;
+  const sourceHeight = el.videoHeight || el.height || 1;
   const sourceAspect = sourceWidth / sourceHeight;
   const targetAspect = w / h;
 
@@ -515,7 +543,7 @@ function drawCoverImage(target, source, x, y, w, h) {
     sy = (sourceHeight - sh) * 0.5;
   }
 
-  target.image(source, x, y, w, h, sx, sy, sw, sh);
+  target.drawingContext.drawImage(el, sx, sy, sw, sh, x, y, w, h);
 }
 
 function windowResized() {
